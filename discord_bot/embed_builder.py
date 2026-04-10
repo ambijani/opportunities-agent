@@ -38,12 +38,12 @@ def build_embed(job: Job) -> discord.Embed:
         timestamp=datetime.utcnow(),
     )
 
-    embed.add_field(name="Company",      value=job.company or "Unknown",  inline=True)
-    embed.add_field(name="Location",     value=job.location or "Unknown", inline=True)
-    embed.add_field(name="Date Posted",  value=job.date_posted or "Unknown", inline=True)
+    embed.add_field(name="Company",      value=(job.company or "Unknown")[:1024],    inline=True)
+    embed.add_field(name="Location",     value=(job.location or "Unknown")[:1024],   inline=True)
+    embed.add_field(name="Date Posted",  value=(job.date_posted or "Unknown")[:1024], inline=True)
 
     if job.description:
-        embed.add_field(name="Description", value=job.description, inline=False)
+        embed.add_field(name="Description", value=job.description[:1024], inline=False)
 
     embed.add_field(
         name="Apply",
