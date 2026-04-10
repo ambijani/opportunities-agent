@@ -92,6 +92,10 @@ class GitHubScraper(BaseScraper):
         return rows
 
     def _extract_url(self, cell: str) -> str | None:
+        # <a href="url"><img ...></a> (HTML anchor in markdown cell)
+        m = re.search(r'href="(https?://[^"]+)"', cell)
+        if m:
+            return m.group(1)
         # [![Apply](badge)](url) or [![text](img)](url)
         m = re.search(r"\[!\[.*?\]\(.*?\)\]\((https?://[^)]+)\)", cell)
         if m:

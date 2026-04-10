@@ -9,7 +9,6 @@ Scrapes job/internship postings from multiple sources daily and posts them to th
 | [underclassmen-opportunities](https://github.com/Jose-Gael-Cruz-Lopez/underclassmen-opportunities) | GitHub README |
 | [intern-list.com](https://www.intern-list.com/) | Web (jobright.ai embed) |
 | [newgrad-jobs.com](https://www.newgrad-jobs.com/) | Web (jobright.ai embed) |
-| Slack channel | Slack API (optional) |
 
 ## Discord Channel Structure
 
@@ -72,22 +71,7 @@ Open `.env` and fill in:
 - `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
 - `SCHEDULE_TIMEZONE` — your local timezone (e.g. `America/New_York`, `America/Chicago`, `America/Los_Angeles`)
 
-### 5. (Optional) Slack source
-
-If your Slack channel is in a workspace where you can install apps:
-
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From Scratch**
-2. Under **OAuth & Permissions**, add scopes:
-   - `channels:history` (if channel is public)
-   - `groups:history` (if channel is private)
-3. Click **Install to Workspace** and copy the **Bot User OAuth Token**
-4. In Discord — invite the bot to the channel: `/invite @YourBotName`
-5. Right-click the Slack channel → **Copy Link** — the ID is the last part (e.g. `C0123456789`)
-6. Set `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID` in `.env`
-
-If Slack is not configured, that source is simply skipped.
-
-### 6. Run
+### 5. Run
 
 ```bash
 python main.py
