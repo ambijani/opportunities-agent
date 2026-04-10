@@ -1,12 +1,13 @@
 """
 Claude-based classifier for jobs that keyword_filter couldn't confidently classify.
-Only called when job_type or category is still None after the keyword pass.
+Batches multiple jobs into a single API call to avoid sequential slowness.
 """
 import json
 import logging
+import re
+import asyncio
 
 import anthropic
-from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 
 import config
 from database.models import Job
@@ -19,83 +20,116 @@ CATEGORIES = [
     "consulting",
     "humanities-healthcare-medicine",
     "programs",
+    "scholarships",
 ]
 
-SYSTEM_PROMPT = """You are a job classification assistant. Given a job posting, you output a JSON object with two fields:
-- "job_type": either "internship" or "full_time"
-- "category": one of exactly these five strings:
-    - "cs-engineering-tech"
-    - "business-finance-banking"
-    - "consulting"
-    - "humanities-healthcare-medicine"
-    - "programs"
+# How many jobs to classify per API call
+BATCH_SIZE = 20
+
+SYSTEM_PROMPT = """\
+You are a job classification assistant. You will receive a JSON array of job postings.
+For each one, return a JSON array (same order) where each element has exactly:
+  - "job_type": "internship" or "full_time"
+  - "category": one of these six exact strings:
+      "cs-engineering-tech"
+      "business-finance-banking"
+      "consulting"
+      "humanities-healthcare-medicine"
+      "programs"
+      "scholarships"
 
 Rules:
-- If the role is for students/undergrads/summer, it's "internship". Otherwise "full_time".
-- "programs" is for fellowships, scholarships, rotational programs, and diversity initiatives.
-- If uncertain about category, pick the closest match — never return null.
-- Respond with ONLY the JSON object, no explanation."""
-
-USER_TEMPLATE = """Title: {title}
-Company: {company}
-Location: {location}
-Description: {description}
-Source: {source}"""
+- Student/undergrad/summer roles → "internship". Otherwise → "full_time".
+- "scholarships" = any scholarship, grant, bursary, tuition assistance, or academic award. Must be primarily a financial award — NOT a paid internship or program that happens to mention funding.
+- "business-finance-banking" includes marketing, sales, operations, supply chain, HR.
+- "programs" = fellowships, rotational programs, diversity initiatives, hackathons, summits, leadership development programs, short cohort programs. NOT regular internships or jobs.
+- If uncertain, pick the closest match — never omit a result.
+- Return ONLY the JSON array, no explanation, no markdown fences."""
 
 
 class ClaudeClassifier:
     def __init__(self):
-        self._client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        self._client = anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=False,
-    )
-    def classify(self, job: Job) -> Job:
+    async def classify_batch(self, jobs: list[Job]) -> list[Job]:
         """
-        Fills in job.job_type and/or job.category using Claude.
-        Only sends fields that are still None.
+        Classify jobs in batches, paced to stay under the 10k output tokens/min limit.
+        Each batch of 20 jobs produces ~500 tokens → max 20 batches/min → 1 per 3 seconds.
+        Sequential + sleep is more efficient than concurrent + retries at this tier.
         """
-        if job.job_type is not None and job.category is not None:
-            return job  # already fully classified
+        chunks = [jobs[i:i + BATCH_SIZE] for i in range(0, len(jobs), BATCH_SIZE)]
+        results: list[list[Job]] = []
+        for i, chunk in enumerate(chunks):
+            if i > 0:
+                await asyncio.sleep(3)  # pace to ~20 batches/min (10k token limit)
+            results.append(await self._classify_chunk(chunk))
+        return [job for chunk_result in results for job in chunk_result]
 
-        user_message = USER_TEMPLATE.format(
-            title=job.title,
-            company=job.company,
-            location=job.location,
-            description=job.description[:300],
-            source=job.source,
-        )
+    async def classify(self, job: Job) -> Job:
+        """Classify a single job (convenience wrapper)."""
+        results = await self.classify_batch([job])
+        return results[0]
 
-        try:
-            response = self._client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=100,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_message}],
-            )
-            raw = response.content[0].text.strip()
-            result = json.loads(raw)
+    async def _classify_chunk(self, jobs: list[Job]) -> list[Job]:
+        payload = [
+            {
+                "index": i,
+                "title": job.title,
+                "company": job.company,
+                "description": job.description[:200],
+                "source": job.source,
+            }
+            for i, job in enumerate(jobs)
+        ]
 
+        for attempt in range(3):
+            try:
+                response = await self._client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=BATCH_SIZE * 30,  # ~30 tokens per job result
+                    system=SYSTEM_PROMPT,
+                    messages=[{
+                        "role": "user",
+                        "content": json.dumps(payload, ensure_ascii=False),
+                    }],
+                )
+                raw = response.content[0].text.strip()
+                logger.debug("Claude raw response (batch of %d): %r", len(jobs), raw[:300])
+
+                # Strip markdown fences if present
+                raw = re.sub(r"^```(?:json)?\s*", "", raw)
+                raw = re.sub(r"\s*```$", "", raw)
+                raw = raw.strip()
+
+                results = json.loads(raw)
+                if not isinstance(results, list) or len(results) != len(jobs):
+                    raise ValueError(
+                        f"Expected list of {len(jobs)}, got {type(results).__name__} "
+                        f"of length {len(results) if isinstance(results, list) else '?'}"
+                    )
+
+                for job, result in zip(jobs, results):
+                    jt = str(result.get("job_type", "")).lower()
+                    cat = str(result.get("category", "")).lower()
+                    if job.job_type is None:
+                        job.job_type = jt if jt in ("internship", "full_time") else "internship"
+                    if job.category is None:
+                        job.category = cat if cat in CATEGORIES else "programs"
+
+                return jobs
+
+            except Exception as e:
+                logger.warning(
+                    "Claude batch attempt %d/%d failed: %s", attempt + 1, 3, e
+                )
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+
+        # Fallback: apply defaults for anything still unclassified
+        logger.warning("All Claude attempts failed — applying fallback defaults to batch of %d", len(jobs))
+        for job in jobs:
             if job.job_type is None:
-                job_type = result.get("job_type", "").lower()
-                if job_type in ("internship", "full_time"):
-                    job.job_type = job_type
-
+                job.job_type = "internship"
             if job.category is None:
-                category = result.get("category", "").lower()
-                if category in CATEGORIES:
-                    job.category = category
-
-        except (json.JSONDecodeError, KeyError, IndexError, anthropic.APIError) as e:
-            logger.warning("Claude classification failed for '%s': %s", job.title, e)
-
-        # Hard fallbacks — never leave None
-        if job.job_type is None:
-            job.job_type = "internship"
-        if job.category is None:
-            job.category = "programs"
-
-        return job
+                job.category = "programs"
+        return jobs

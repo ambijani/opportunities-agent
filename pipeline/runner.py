@@ -15,10 +15,10 @@ from database.models import Job
 from scrapers.github_scraper import GitHubScraper
 from scrapers.intern_list_scraper import InternListScraper
 from scrapers.newgrad_jobs_scraper import NewGradJobsScraper
-from scrapers.slack_scraper import SlackScraper
 from classifier import keyword_filter
 from classifier.claude_classifier import ClaudeClassifier
 from discord_bot.bot import OpportunitiesBot
+from pipeline.link_validator import validate_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +32,9 @@ async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
         GitHubScraper(),
         InternListScraper(),
         NewGradJobsScraper(),
-        SlackScraper(),
     ]
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [loop.run_in_executor(executor, s.scrape) for s in scrapers]
         results = await asyncio.gather(*futures, return_exceptions=True)
 
@@ -57,25 +56,28 @@ async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
         return
 
     # ── 3. Classify ───────────────────────────────────────────────────────────
-    claude = ClaudeClassifier()
-    classified: list[Job] = []
-
+    # Pass 1: fast keyword filter
     for job in new_jobs:
-        job = keyword_filter.classify(job)
-        if job.job_type is None or job.category is None:
-            job = claude.classify(job)
-        classified.append(job)
+        keyword_filter.classify(job)
 
-    kw_classified = sum(
-        1 for j in classified if j.job_type is not None and j.category is not None
-    )
-    logger.info(
-        "Classification done: %d via keywords, %d via Claude",
-        kw_classified,
-        len(classified) - kw_classified,
-    )
+    kw_done = [j for j in new_jobs if j.job_type is not None and j.category is not None]
+    needs_claude = [j for j in new_jobs if j.job_type is None or j.category is None]
+    logger.info("Keywords classified %d; sending %d to Claude", len(kw_done), len(needs_claude))
 
-    # ── 4. Post to Discord ────────────────────────────────────────────────────
+    # Pass 2: Claude batch for the remainder
+    if needs_claude:
+        claude = ClaudeClassifier()
+        needs_claude = await claude.classify_batch(needs_claude)
+
+    classified = new_jobs  # mutations were in-place
+
+    # ── 4. Validate links ─────────────────────────────────────────────────────
+    classified = await validate_jobs(classified)
+    if not classified:
+        logger.info("No valid links to post after validation.")
+        return
+
+    # ── 5. Post to Discord ────────────────────────────────────────────────────
     posted = 0
     for job in classified:
         channel_id = await bot.post_job(job)

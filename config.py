@@ -25,27 +25,28 @@ CATEGORIES = [
     "consulting",
     "humanities-healthcare-medicine",
     "programs",
+    "scholarships",
 ]
 
 JOB_TYPES = ["internship", "full_time"]
 
 # Maps (job_type, category) → Discord channel ID
+_SCHOLARSHIPS_CHANNEL_ID = int(os.getenv("DISCORD_SCHOLARSHIPS_CHANNEL_ID", "0"))
+
 CHANNEL_MAP: dict[tuple[str, str], int] = {
     ("internship", "programs"):                    int(os.getenv("DISCORD_INTERN_PROGRAMS_CHANNEL_ID", "0")),
     ("internship", "cs-engineering-tech"):         int(os.getenv("DISCORD_INTERN_CS_ENGINEERING_CHANNEL_ID", "0")),
     ("internship", "business-finance-banking"):    int(os.getenv("DISCORD_INTERN_BUSINESS_FINANCE_CHANNEL_ID", "0")),
     ("internship", "consulting"):                  int(os.getenv("DISCORD_INTERN_CONSULTING_CHANNEL_ID", "0")),
     ("internship", "humanities-healthcare-medicine"): int(os.getenv("DISCORD_INTERN_HUMANITIES_HEALTHCARE_CHANNEL_ID", "0")),
+    ("internship", "scholarships"):               _SCHOLARSHIPS_CHANNEL_ID,
     ("full_time", "programs"):                     int(os.getenv("DISCORD_FT_PROGRAMS_CHANNEL_ID", "0")),
     ("full_time", "cs-engineering-tech"):          int(os.getenv("DISCORD_FT_CS_ENGINEERING_CHANNEL_ID", "0")),
     ("full_time", "business-finance-banking"):     int(os.getenv("DISCORD_FT_BUSINESS_FINANCE_CHANNEL_ID", "0")),
     ("full_time", "consulting"):                   int(os.getenv("DISCORD_FT_CONSULTING_CHANNEL_ID", "0")),
     ("full_time", "humanities-healthcare-medicine"): int(os.getenv("DISCORD_FT_HUMANITIES_HEALTHCARE_CHANNEL_ID", "0")),
+    ("full_time", "scholarships"):                _SCHOLARSHIPS_CHANNEL_ID,
 }
-
-# ─── Slack ────────────────────────────────────────────────────────────────────
-SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
-SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "")
 
 # ─── Scheduler ────────────────────────────────────────────────────────────────
 SCHEDULE_HOUR = int(os.getenv("SCHEDULE_HOUR", "19"))
@@ -62,4 +63,5 @@ CATEGORY_COLORS: dict[str, int] = {
     "consulting":                   0x2D9B27,   # Forest green
     "humanities-healthcare-medicine": 0xED4245, # Warm red
     "programs":                     0x9B59B6,   # Purple
+    "scholarships":                 0xE67E22,   # Orange
 }

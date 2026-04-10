@@ -8,7 +8,8 @@ CATEGORY_DISPLAY = {
     "business-finance-banking":     "Business / Finance / Banking",
     "consulting":                   "Consulting",
     "humanities-healthcare-medicine": "Humanities / Healthcare / Medicine",
-    "programs":                     "Programs & Fellowships",
+    "programs":                     "Fellowships & Programs",
+    "scholarships":                 "Scholarships",
 }
 
 TYPE_LABEL = {
