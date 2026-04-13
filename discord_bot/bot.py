@@ -46,20 +46,14 @@ class OpportunitiesBot:
                 return None
         return channel
 
-    async def post_jobs(self, jobs: list[Job]) -> list[Job]:
+    async def post_jobs(self, channel_id: int, jobs: list[Job]) -> list[Job]:
         """
-        Post a list of jobs, all destined for the same channel.
+        Post a list of jobs to a specific channel.
         - ≤ BATCH_THRESHOLD jobs → one embed per message (more visible).
         - > BATCH_THRESHOLD jobs → up to EMBEDS_PER_MESSAGE embeds per message (less spam).
         Returns the jobs that were successfully posted.
         """
         if not jobs:
-            return []
-
-        key = (jobs[0].job_type or "internship", jobs[0].category or "programs")
-        channel_id = config.CHANNEL_MAP.get(key)
-        if not channel_id:
-            logger.warning("No channel configured for %s — skipping %d jobs", key, len(jobs))
             return []
 
         channel = await self._get_channel(channel_id)
@@ -97,10 +91,3 @@ class OpportunitiesBot:
 
         return posted
 
-    async def post_job(self, job: Job) -> int | None:
-        """Single-job convenience wrapper (used by runner for DB tracking)."""
-        posted = await self.post_jobs([job])
-        if posted:
-            key = (job.job_type or "internship", job.category or "programs")
-            return config.CHANNEL_MAP.get(key)
-        return None

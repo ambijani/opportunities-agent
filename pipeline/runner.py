@@ -78,19 +78,21 @@ async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
         return
 
     # ── 5. Post to Discord ────────────────────────────────────────────────────
-    # Group by channel key so batching logic can see the full count per channel
+    # Group by resolved channel_id so batching sees the full count per channel
+    # (handles cases where multiple category keys map to the same channel)
     from collections import defaultdict
-    by_channel: dict[tuple, list[Job]] = defaultdict(list)
+    by_channel: dict[int, list[Job]] = defaultdict(list)
     for job in classified:
         key = (job.job_type or "internship", job.category or "programs")
-        by_channel[key].append(job)
+        channel_id = config.CHANNEL_MAP.get(key)
+        if channel_id:
+            by_channel[channel_id].append(job)
+        else:
+            logger.warning("No channel configured for %s — skipping: %s", key, job.title)
 
     posted = 0
-    for key, channel_jobs in by_channel.items():
-        channel_id = config.CHANNEL_MAP.get(key)
-        if not channel_id:
-            continue
-        successfully_posted = await bot.post_jobs(channel_jobs)
+    for channel_id, channel_jobs in by_channel.items():
+        successfully_posted = await bot.post_jobs(channel_id, channel_jobs)
         for job in successfully_posted:
             db.mark_posted(job, channel_id)
             posted += 1

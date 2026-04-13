@@ -38,11 +38,13 @@ For each one, return a JSON array (same order) where each element has exactly:
       "programs"
       "scholarships"
 
-Rules:
-- Student/undergrad/summer roles → "internship". Otherwise → "full_time".
-- "scholarships" = any scholarship, grant, bursary, tuition assistance, or academic award. Must be primarily a financial award — NOT a paid internship or program that happens to mention funding.
-- "business-finance-banking" includes marketing, sales, operations, supply chain, HR.
-- "programs" = fellowships, rotational programs, diversity initiatives, hackathons, summits, leadership development programs, short cohort programs. NOT regular internships or jobs.
+Category rules (apply top-to-bottom; first match wins):
+- "scholarships": financial awards only — scholarships, grants, bursaries, tuition assistance, academic awards. NOT paid internships or programs that mention funding.
+- "programs": fellowships, rotational programs, diversity initiatives, hackathons, summits, leadership development programs, short cohort programs. NOT regular internships or full-time jobs.
+- "consulting": consulting, advisory, or strategy consulting roles; includes big-4 and MBB firms (McKinsey, Bain, BCG, Deloitte, Accenture, KPMG, PwC, EY).
+- "cs-engineering-tech": SWE/SDE, data analyst, data engineer, data scientist, machine learning/AI/deep learning/NLP, product management, engineering & development (hardware, firmware, electrical, mechanical, robotics, aerospace, R&D), cybersecurity/infosec, DevOps, cloud, IT, QA.
+- "business-finance-banking": marketing, business analyst, accounting & finance, banking, investment banking, private equity, management & executive, sales, project management, supply chain/logistics/procurement, operations.
+- "humanities-healthcare-medicine": creative & design, human resources/HR/recruiting, arts & entertainment, customer service & support, legal & compliance, public sector & government, education & training, healthcare/medicine/clinical/nursing.
 - If uncertain, pick the closest match — never omit a result.
 - Return ONLY the JSON array, no explanation, no markdown fences."""
 
