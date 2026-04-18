@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import discord
 import config
 from database.models import Job
@@ -35,7 +35,7 @@ def build_embed(job: Job) -> discord.Embed:
         title=f"{type_label}  {job.title} — {job.company}",
         url=job.url,
         color=color,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
 
     embed.add_field(name="Company",      value=(job.company or "Unknown")[:1024],    inline=True)
