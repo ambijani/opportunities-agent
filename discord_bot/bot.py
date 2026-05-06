@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 import discord
+from discord.ext import commands
 
 import config
 from database.models import Job
@@ -20,13 +21,20 @@ EMBEDS_PER_MESSAGE = 10
 class OpportunitiesBot:
     def __init__(self):
         intents = discord.Intents.default()
-        self._client = discord.Client(intents=intents)
+        self._client = commands.Bot(command_prefix="!", intents=intents)
+        self._tree = self._client.tree
         self._ready = asyncio.Event()
 
         @self._client.event
         async def on_ready():
             logger.info("Discord bot logged in as %s", self._client.user)
+            await self._tree.sync()
+            logger.info("Slash commands synced (may take up to 1 hour to appear globally)")
             self._ready.set()
+
+    def setup_commands(self, db) -> None:
+        from .slash_commands import register
+        register(self._tree, self, db)
 
     async def start(self):
         """Connect to Discord (non-blocking; call once at startup)."""
