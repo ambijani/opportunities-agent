@@ -39,7 +39,7 @@ class OpportunitiesBot:
     async def start(self):
         """Connect to Discord (non-blocking; call once at startup)."""
         asyncio.create_task(self._client.start(config.DISCORD_BOT_TOKEN))
-        await asyncio.wait_for(self._ready.wait(), timeout=30)
+        await asyncio.wait_for(self._ready.wait(), timeout=60)
 
     async def close(self):
         await self._client.close()
