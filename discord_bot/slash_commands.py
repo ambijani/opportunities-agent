@@ -7,12 +7,36 @@ import discord
 from discord import app_commands
 
 import config
-from classifier import keyword_filter
-from classifier.claude_classifier import ClaudeClassifier
 from database.models import Job
 from pipeline.link_validator import _check_url
 
 logger = logging.getLogger(__name__)
+
+# Human-readable labels for channel map keys
+_TYPE_LABEL = {"internship": "Internship", "full_time": "Full-time"}
+_CAT_LABEL = {
+    "cs-engineering-tech":            "CS / Engineering / Tech",
+    "business-finance-banking":       "Business / Finance / Banking",
+    "consulting":                     "Consulting",
+    "humanities-healthcare-medicine": "Humanities / Healthcare / Medicine",
+    "programs":                       "Programs",
+    "scholarships":                   "Scholarships",
+}
+
+
+def _channel_options() -> list[discord.SelectOption]:
+    seen = set()
+    options = []
+    for (job_type, category), channel_id in config.CHANNEL_MAP.items():
+        if not channel_id or channel_id in seen:
+            continue
+        seen.add(channel_id)
+        label = f"{_TYPE_LABEL.get(job_type, job_type)} · {_CAT_LABEL.get(category, category)}"
+        options.append(discord.SelectOption(
+            label=label,
+            value=f"{job_type}|{category}|{channel_id}",
+        ))
+    return options
 
 
 class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
@@ -48,10 +72,13 @@ class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
         max_length=300,
     )
 
-    def __init__(self, bot, db):
+    def __init__(self, bot, db, channel_id: int, job_type: str, category: str):
         super().__init__()
         self._bot = bot
         self._db = db
+        self._channel_id = channel_id
+        self._job_type = job_type
+        self._category = category
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -73,17 +100,9 @@ class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
             url=raw_url,
             date_posted=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             source="manual",
+            job_type=self._job_type,
+            category=self._category,
         )
-
-        # Classify — keywords first, Claude for anything ambiguous
-        keyword_filter.classify(job)
-        if job.job_type is None or job.category is None:
-            try:
-                job = (await ClaudeClassifier().classify_batch([job]))[0]
-            except Exception as e:
-                logger.warning("Claude classification failed for manual job: %s", e)
-                job.job_type = job.job_type or "internship"
-                job.category = job.category or "programs"
 
         # Validate the link is reachable
         loop = asyncio.get_running_loop()
@@ -95,17 +114,7 @@ class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
             )
             return
 
-        # Resolve Discord channel
-        channel_id = config.CHANNEL_MAP.get((job.job_type, job.category))
-        if not channel_id:
-            await interaction.followup.send(
-                f"No channel configured for `{job.job_type}` / `{job.category}`.",
-                ephemeral=True,
-            )
-            return
-
-        # Post and record
-        posted = await self._bot.post_jobs(channel_id, [job])
+        posted = await self._bot.post_jobs(self._channel_id, [job])
         if not posted:
             await interaction.followup.send(
                 "Failed to post — check bot permissions in the target channel.",
@@ -113,14 +122,13 @@ class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
             )
             return
 
-        self._db.mark_posted(job, channel_id)
+        self._db.mark_posted(job, self._channel_id)
 
-        channel = self._bot._client.get_channel(channel_id)
-        mention = channel.mention if channel else f"<#{channel_id}>"
+        channel = self._bot._client.get_channel(self._channel_id)
+        mention = channel.mention if channel else f"<#{self._channel_id}>"
 
         await interaction.followup.send(
-            f"Posted **{job.title}** at **{job.company}** → {mention} "
-            f"(`{job.job_type}` / `{job.category}`).",
+            f"Posted **{job.title}** at **{job.company}** → {mention}.",
             ephemeral=True,
         )
 
@@ -134,10 +142,34 @@ class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
             pass
 
 
+class ChannelSelectView(discord.ui.View):
+    def __init__(self, bot, db):
+        super().__init__(timeout=60)
+        self._bot = bot
+        self._db = db
+
+        select = discord.ui.Select(
+            placeholder="Pick a channel to post in...",
+            options=_channel_options(),
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        job_type, category, channel_id_str = interaction.data["values"][0].split("|")
+        await interaction.response.send_modal(
+            AddJobModal(self._bot, self._db, int(channel_id_str), job_type, category)
+        )
+
+
 def register(tree: app_commands.CommandTree, bot, db) -> None:
     @tree.command(
         name="add-job",
         description="Manually add an opportunity and post it immediately",
     )
     async def add_job(interaction: discord.Interaction):
-        await interaction.response.send_modal(AddJobModal(bot, db))
+        await interaction.response.send_message(
+            "Where should this be posted?",
+            view=ChannelSelectView(bot, db),
+            ephemeral=True,
+        )
