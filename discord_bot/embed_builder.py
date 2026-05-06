@@ -22,6 +22,7 @@ SOURCE_DISPLAY = {
     "intern_list":   "intern-list.com",
     "newgrad_jobs":  "newgrad-jobs.com",
     "slack":         "Slack",
+    "manual":        "Manual submission",
 }
 
 

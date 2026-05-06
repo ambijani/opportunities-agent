@@ -28,6 +28,7 @@ async def main():
     # ── Initialize shared resources ───────────────────────────────────────────
     db = Database(config.DB_PATH)
     bot = OpportunitiesBot()
+    bot.setup_commands(db)
 
     await bot.start()
 
