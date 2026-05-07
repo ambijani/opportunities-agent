@@ -101,6 +101,10 @@ def _check_url(url: str) -> tuple[str, bool, str]:
         if resp.status_code in VALID_STATUSES:
             return url, True, "ok"
 
+        if resp.status_code == 403:
+            # Anti-bot blocking ≠ dead link
+            return url, True, "ok"
+
         if resp.status_code == 405:
             # Server doesn't support HEAD — try GET
             resp = requests.get(
@@ -109,6 +113,8 @@ def _check_url(url: str) -> tuple[str, bool, str]:
             )
             resp.close()
             if resp.status_code in VALID_STATUSES:
+                return url, True, "ok"
+            if resp.status_code == 403:
                 return url, True, "ok"
 
         return url, False, f"DEAD LINK — HTTP {resp.status_code}"
