@@ -8,3 +8,6 @@ APScheduler==3.11.0
 tenacity==9.1.2
 python-dotenv==1.1.0
 tzdata==2025.2
+google-cloud-firestore==2.19.0
+fastapi==0.115.12
+uvicorn==0.34.2
