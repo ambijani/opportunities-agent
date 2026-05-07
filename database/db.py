@@ -48,3 +48,26 @@ class Database:
             src = doc.get("source") or "unknown"
             by_source[src] = by_source.get(src, 0) + 1
         return {"total": total, "by_source": by_source}
+
+    # ── Manual-pick subscriptions ─────────────────────────────────────────────
+
+    def add_subscriber(self, user_id: int) -> bool:
+        """Add a subscriber. Returns False if already subscribed."""
+        ref = self._db.collection("manual_subscribers").document(str(user_id))
+        if ref.get().exists:
+            return False
+        ref.set({"user_id": str(user_id), "subscribed_at": datetime.now(timezone.utc).isoformat()})
+        return True
+
+    def remove_subscriber(self, user_id: int) -> bool:
+        """Remove a subscriber. Returns False if wasn't subscribed."""
+        ref = self._db.collection("manual_subscribers").document(str(user_id))
+        if not ref.get().exists:
+            return False
+        ref.delete()
+        return True
+
+    def get_subscribers(self) -> list[int]:
+        """Return all subscribed user IDs."""
+        docs = self._db.collection("manual_subscribers").stream()
+        return [int(doc.get("user_id")) for doc in docs]
