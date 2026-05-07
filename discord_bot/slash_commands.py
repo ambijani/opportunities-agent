@@ -133,7 +133,7 @@ class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
         )
 
         # DM subscribers
-        asyncio.create_task(self._bot.dm_manual_subscribers(self._db, job))
+        asyncio.create_task(self._bot.dm_manual_subscribers(self._db, job, self._channel_id))
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
         logger.error("Error in AddJobModal: %s", error, exc_info=True)
@@ -165,6 +165,53 @@ class ChannelSelectView(discord.ui.View):
         )
 
 
+def _subscribe_options() -> list[discord.SelectOption]:
+    seen = set()
+    options = []
+    for (job_type, category), channel_id in config.CHANNEL_MAP.items():
+        if not channel_id or channel_id in seen:
+            continue
+        seen.add(channel_id)
+        label = f"{_TYPE_LABEL.get(job_type, job_type)} · {_CAT_LABEL.get(category, category)}"
+        options.append(discord.SelectOption(label=label, value=str(channel_id)))
+    return options
+
+
+class SubscribeView(discord.ui.View):
+    def __init__(self, db, existing_channels: list[str]):
+        super().__init__(timeout=120)
+        self._db = db
+
+        options = _subscribe_options()
+        select = discord.ui.Select(
+            placeholder="Select channels...",
+            min_values=1,
+            max_values=len(options),
+            options=options,
+        )
+        # Pre-mark channels they're already subscribed to
+        for opt in options:
+            if opt.value in existing_channels:
+                opt.default = True
+
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        chosen = [int(v) for v in interaction.data["values"]]
+        self._db.set_subscriber_channels(interaction.user.id, chosen)
+        labels = [
+            opt.label
+            for opt in self.children[0].options
+            if opt.value in interaction.data["values"]
+        ]
+        summary = "\n".join(f"• {l}" for l in labels)
+        await interaction.response.edit_message(
+            content=f"Subscribed! You'll get DMs for:\n{summary}\n\nRun `/subscribe` again to change, or `/unsubscribe` to opt out.",
+            view=None,
+        )
+
+
 def register(tree: app_commands.CommandTree, bot, db) -> None:
     @tree.command(
         name="add-job",
@@ -179,20 +226,16 @@ def register(tree: app_commands.CommandTree, bot, db) -> None:
 
     @tree.command(
         name="subscribe",
-        description="Get DMs when a manually curated opportunity is posted",
+        description="Choose which channels to get DMs for when a curated opportunity is posted",
     )
     async def subscribe(interaction: discord.Interaction):
-        added = db.add_subscriber(interaction.user.id)
-        if added:
-            await interaction.response.send_message(
-                "You're subscribed! I'll DM you whenever a curated opportunity is posted.",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                "You're already subscribed. Use `/unsubscribe` to opt out.",
-                ephemeral=True,
-            )
+        existing = db.get_subscriber_channels(interaction.user.id) or []
+        view = SubscribeView(db, existing_channels=existing)
+        await interaction.response.send_message(
+            "Pick the channels you want DMs for (select all that apply):",
+            view=view,
+            ephemeral=True,
+        )
 
     @tree.command(
         name="unsubscribe",
