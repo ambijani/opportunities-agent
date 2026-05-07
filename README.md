@@ -1,6 +1,6 @@
 # opportunities-agent
 
-Scrapes job/internship postings from multiple sources daily and posts them to the correct Discord channels.
+Scrapes job/internship postings from multiple sources daily and posts them to the correct Discord channels. Runs on Google Cloud Run with Firestore for deduplication.
 
 ## Sources
 
@@ -30,7 +30,7 @@ Full-Time
 
 ---
 
-## Setup
+## Local Development
 
 ### 1. Install dependencies
 
@@ -38,65 +38,125 @@ Full-Time
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-playwright install chromium     # one-time browser install
+playwright install chromium
 ```
 
-### 2. Create a Discord Bot
-
-1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
-2. Click **New Application** → give it a name (e.g. `opportunities-bot`)
-3. Go to **Bot** in the left sidebar → click **Add Bot**
-4. Under **Token**, click **Reset Token** and copy it — this is your `DISCORD_BOT_TOKEN`
-5. Scroll down to **Privileged Gateway Intents** — enable **Server Members Intent** and **Message Content Intent**
-6. Go to **OAuth2 → URL Generator**:
-   - Scopes: `bot`
-   - Bot Permissions: `Send Messages`, `Embed Links`, `View Channels`
-7. Copy the generated URL, open it in your browser, and invite the bot to your server
-
-### 3. Get Discord Channel IDs
-
-1. In Discord, go to **User Settings → Advanced** and enable **Developer Mode**
-2. Right-click each channel → **Copy Channel ID**
-3. You'll need one ID per channel (10 channels total)
-
-### 4. Configure environment
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and fill in:
-- `DISCORD_BOT_TOKEN` — from step 2
-- All 10 `DISCORD_*_CHANNEL_ID` values — from step 3
+Fill in `.env`:
+- `DISCORD_BOT_TOKEN` — from [discord.com/developers/applications](https://discord.com/developers/applications)
+- All `DISCORD_*_CHANNEL_ID` values — right-click channels in Discord (Developer Mode on)
 - `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
-- `SCHEDULE_TIMEZONE` — your local timezone (e.g. `America/New_York`, `America/Chicago`, `America/Los_Angeles`)
+- `SCHEDULE_TIMEZONE` — e.g. `America/Chicago`
 
-### 5. Run
+### 3. Authenticate with GCP (for Firestore)
+
+```bash
+gcloud auth application-default login
+```
+
+### 4. Run
 
 ```bash
 python main.py
 ```
 
-The agent will start, connect to Discord, and run every day at **7:00 PM** in your configured timezone. Jobs already posted are tracked in `data/opportunities.db` and will never be re-posted.
+Connects to Discord, starts the scheduler (daily at 7pm Central), and serves a health check at `http://localhost:8080/health`.
 
-### Run once immediately (for testing)
+---
 
-```python
-# In a Python shell or separate script
-import asyncio
-from database.db import Database
-from discord_bot.bot import OpportunitiesBot
-from pipeline.runner import run_pipeline
-import config
+## Deploying to Cloud Run
 
-async def test():
-    db = Database(config.DB_PATH)
-    bot = OpportunitiesBot()
-    await bot.start()
-    await run_pipeline(bot, db)
-    await bot.close()
+### Prerequisites (one-time)
 
-asyncio.run(test())
+```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable run.googleapis.com firestore.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com
+```
+
+### 1. Create Firestore database
+
+```bash
+gcloud firestore databases create --location=us-central1 --project=YOUR_PROJECT_ID
+```
+
+### 2. Store secrets
+
+```bash
+echo -n "YOUR_BOT_TOKEN" | gcloud secrets create DISCORD_BOT_TOKEN --data-file=- --project=YOUR_PROJECT_ID
+echo -n "YOUR_ANTHROPIC_KEY" | gcloud secrets create ANTHROPIC_API_KEY --data-file=- --project=YOUR_PROJECT_ID
+```
+
+Grant the Cloud Run service account access:
+
+```bash
+gcloud secrets add-iam-policy-binding DISCORD_BOT_TOKEN --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role="roles/secretmanager.secretAccessor" --project=YOUR_PROJECT_ID
+gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role="roles/secretmanager.secretAccessor" --project=YOUR_PROJECT_ID
+```
+
+### 3. Fill in channel IDs
+
+Edit `deploy/env-vars.txt` with your Discord channel IDs.
+
+### 4. Deploy
+
+```bash
+GCP_PROJECT_ID=YOUR_PROJECT_ID bash deploy/deploy.sh
+```
+
+To redeploy after code changes, just run step 4 again.
+
+---
+
+## Troubleshooting
+
+### Check if the bot is running
+
+Look for the bot online in Discord. If it's offline, check the logs first.
+
+### View logs
+
+```bash
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=opportunities-agent" --project=YOUR_PROJECT_ID --limit=50 --format="table(timestamp,textPayload)"
+```
+
+### Check the health endpoint (requires auth)
+
+```bash
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" YOUR_CLOUD_RUN_URL/health
+```
+
+Should return `{"status":"ok"}`. A 403 without the auth header is expected — the service is not publicly accessible.
+
+### Check Cloud Run service status
+
+```bash
+gcloud run services describe opportunities-agent --region=us-central1 --project=YOUR_PROJECT_ID
+```
+
+Look at `status.conditions` — `Ready: True` means it's healthy.
+
+### Check Firestore data
+
+Go to [console.cloud.google.com](https://console.cloud.google.com) → Firestore → `posted_jobs` collection. Each document is a posted job keyed by a hash of its URL.
+
+### Bot connected but pipeline not running
+
+- Confirm `SCHEDULE_HOUR`, `SCHEDULE_MINUTE`, and `SCHEDULE_TIMEZONE` in `deploy/env-vars.txt` are correct
+- Check logs around 7pm Central for pipeline output
+- To trigger a manual run, use the `/add-job` slash command in Discord
+
+### Redeploying after a crash
+
+Cloud Run automatically restarts the container on failure. If it keeps crashing, check the logs for the error and redeploy after fixing:
+
+```bash
+GCP_PROJECT_ID=YOUR_PROJECT_ID bash deploy/deploy.sh
 ```
 
 ---
@@ -105,8 +165,8 @@ asyncio.run(test())
 
 Each job goes through two stages:
 
-1. **Keyword filter** (`classifier/keyword_filter.py`) — fast regex matching assigns `job_type` (internship/full-time) and `category`. Runs instantly, no API cost.
+1. **Keyword filter** (`classifier/keyword_filter.py`) — fast regex matching assigns `job_type` (internship/full-time) and `category`. No API cost.
 
-2. **Claude classifier** (`classifier/claude_classifier.py`) — only called if keywords were ambiguous. Uses `claude-haiku-4-5` (fast + cheap) to classify the remaining jobs.
+2. **Claude classifier** (`classifier/claude_classifier.py`) — only called if keywords were ambiguous. Uses `claude-haiku-4-5` to classify the remaining jobs.
 
 Both stages always produce a result — `programs` is the fallback category if nothing else matches.
