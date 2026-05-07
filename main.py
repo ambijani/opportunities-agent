@@ -1,9 +1,13 @@
 """
-Entry point. Starts the Discord bot and schedules the pipeline to run daily at 7 PM.
+Entry point. Starts the Discord bot, schedules the pipeline, and serves a
+health endpoint on $PORT (default 8080) for Cloud Run.
 """
 import asyncio
 import logging
+import os
 
+import uvicorn
+from fastapi import FastAPI
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -13,6 +17,13 @@ from discord_bot.bot import OpportunitiesBot
 from pipeline.runner import run_pipeline
 
 logger = logging.getLogger(__name__)
+
+health_app = FastAPI()
+
+
+@health_app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 async def main():
@@ -26,11 +37,9 @@ async def main():
         raise SystemExit(f"Missing required env vars: {', '.join(missing)}\nCopy .env.example → .env and fill them in.")
 
     # ── Initialize shared resources ───────────────────────────────────────────
-    db = Database(config.DB_PATH)
+    db = Database()
     bot = OpportunitiesBot()
     bot.setup_commands(db)
-
-    await bot.start()
 
     # ── Scheduler ─────────────────────────────────────────────────────────────
     scheduler = AsyncIOScheduler(timezone=config.SCHEDULE_TIMEZONE)
@@ -46,24 +55,25 @@ async def main():
         name="Daily opportunities pipeline",
         replace_existing=True,
     )
-    scheduler.start()
+
+    # ── Health server config ───────────────────────────────────────────────────
+    port = int(os.getenv("PORT", "8080"))
+    server_config = uvicorn.Config(health_app, host="0.0.0.0", port=port, log_level="warning")
+    server = uvicorn.Server(server_config)
 
     logger.info(
-        "Scheduler started — pipeline runs daily at %02d:%02d %s",
+        "Scheduler will run daily at %02d:%02d %s",
         config.SCHEDULE_HOUR,
         config.SCHEDULE_MINUTE,
         config.SCHEDULE_TIMEZONE,
     )
-    logger.info("Type Ctrl+C to stop.")
 
-    # ── Keep alive ────────────────────────────────────────────────────────────
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Shutting down...")
-        scheduler.shutdown(wait=False)
-        await bot.close()
+    # ── Run everything concurrently ───────────────────────────────────────────
+    scheduler.start()
+    await asyncio.gather(
+        bot.start(),
+        server.serve(),
+    )
 
 
 if __name__ == "__main__":
