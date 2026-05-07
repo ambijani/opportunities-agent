@@ -132,6 +132,9 @@ class AddJobModal(discord.ui.Modal, title="Add Opportunity"):
             ephemeral=True,
         )
 
+        # DM subscribers
+        asyncio.create_task(self._bot.dm_manual_subscribers(self._db, job))
+
     async def on_error(self, interaction: discord.Interaction, error: Exception):
         logger.error("Error in AddJobModal: %s", error, exc_info=True)
         try:
@@ -173,3 +176,37 @@ def register(tree: app_commands.CommandTree, bot, db) -> None:
             view=ChannelSelectView(bot, db),
             ephemeral=True,
         )
+
+    @tree.command(
+        name="subscribe",
+        description="Get DMs when a manually curated opportunity is posted",
+    )
+    async def subscribe(interaction: discord.Interaction):
+        added = db.add_subscriber(interaction.user.id)
+        if added:
+            await interaction.response.send_message(
+                "You're subscribed! I'll DM you whenever a curated opportunity is posted.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "You're already subscribed. Use `/unsubscribe` to opt out.",
+                ephemeral=True,
+            )
+
+    @tree.command(
+        name="unsubscribe",
+        description="Stop receiving DMs for manually curated opportunities",
+    )
+    async def unsubscribe(interaction: discord.Interaction):
+        removed = db.remove_subscriber(interaction.user.id)
+        if removed:
+            await interaction.response.send_message(
+                "You've been unsubscribed and won't receive any more DMs.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "You weren't subscribed. Use `/subscribe` to opt in.",
+                ephemeral=True,
+            )

@@ -99,3 +99,20 @@ class OpportunitiesBot:
 
         return posted
 
+    async def dm_manual_subscribers(self, db, job) -> None:
+        """DM all manual-pick subscribers with the job embed."""
+        subscriber_ids = db.get_subscribers()
+        if not subscriber_ids:
+            return
+        embed = build_embed(job)
+        for user_id in subscriber_ids:
+            try:
+                user = await self._client.fetch_user(user_id)
+                await user.send(
+                    content="📌 A new curated opportunity was just posted:",
+                    embed=embed,
+                )
+                await asyncio.sleep(0.5)
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.warning("Could not DM subscriber %s: %s", user_id, e)
+
