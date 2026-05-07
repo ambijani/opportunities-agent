@@ -99,9 +99,9 @@ class OpportunitiesBot:
 
         return posted
 
-    async def dm_manual_subscribers(self, db, job) -> None:
-        """DM all manual-pick subscribers with the job embed."""
-        subscriber_ids = db.get_subscribers()
+    async def dm_manual_subscribers(self, db, job, channel_id: int) -> None:
+        """DM subscribers who opted into the channel this job was posted to."""
+        subscriber_ids = db.get_subscribers_for_channel(channel_id)
         if not subscriber_ids:
             return
         embed = build_embed(job)

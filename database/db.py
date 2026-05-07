@@ -51,13 +51,14 @@ class Database:
 
     # ── Manual-pick subscriptions ─────────────────────────────────────────────
 
-    def add_subscriber(self, user_id: int) -> bool:
-        """Add a subscriber. Returns False if already subscribed."""
+    def set_subscriber_channels(self, user_id: int, channel_ids: list[int]) -> None:
+        """Save (or replace) a user's channel subscription preferences."""
         ref = self._db.collection("manual_subscribers").document(str(user_id))
-        if ref.get().exists:
-            return False
-        ref.set({"user_id": str(user_id), "subscribed_at": datetime.now(timezone.utc).isoformat()})
-        return True
+        ref.set({
+            "user_id": str(user_id),
+            "channels": [str(c) for c in channel_ids],
+            "subscribed_at": datetime.now(timezone.utc).isoformat(),
+        })
 
     def remove_subscriber(self, user_id: int) -> bool:
         """Remove a subscriber. Returns False if wasn't subscribed."""
@@ -67,7 +68,18 @@ class Database:
         ref.delete()
         return True
 
-    def get_subscribers(self) -> list[int]:
-        """Return all subscribed user IDs."""
-        docs = self._db.collection("manual_subscribers").stream()
+    def get_subscribers_for_channel(self, channel_id: int) -> list[int]:
+        """Return user IDs subscribed to a specific channel."""
+        docs = (
+            self._db.collection("manual_subscribers")
+            .where("channels", "array_contains", str(channel_id))
+            .stream()
+        )
         return [int(doc.get("user_id")) for doc in docs]
+
+    def get_subscriber_channels(self, user_id: int) -> list[str] | None:
+        """Return the channel IDs a user is subscribed to, or None if not subscribed."""
+        doc = self._db.collection("manual_subscribers").document(str(user_id)).get()
+        if not doc.exists:
+            return None
+        return doc.get("channels") or []
