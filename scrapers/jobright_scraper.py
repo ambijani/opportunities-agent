@@ -21,7 +21,7 @@ from .base_scraper import BaseScraper
 
 logger = logging.getLogger(__name__)
 
-PAGE_LOAD_TIMEOUT = 20_000
+PAGE_LOAD_TIMEOUT = 45_000
 MINISITE_TIMEOUT = 15_000
 
 
@@ -82,10 +82,19 @@ class JobrightScraper(BaseScraper):
     def _scrape_all(self, page: Page) -> list[Job]:
         # Step 1: load parent to get session cookies
         logger.info("Loading %s", self.parent_url)
-        try:
-            page.goto(self.parent_url, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT)
-        except Exception:
-            page.goto(self.parent_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT)
+        for attempt in range(2):
+            try:
+                page.goto(self.parent_url, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT)
+                break
+            except Exception:
+                try:
+                    page.goto(self.parent_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT)
+                    break
+                except Exception as e:
+                    if attempt == 1:
+                        raise
+                    logger.warning("Parent page load failed, retrying: %s", e)
+                    time.sleep(3)
         page.wait_for_timeout(2000)
 
         # Step 2: collect job-path slugs (prefer /us/ paths, fall back to all)
