@@ -1,6 +1,15 @@
 # opportunities-agent
 
-Scrapes job/internship postings from multiple sources daily and posts them to the correct Discord channels. Runs on Google Cloud Run with Firestore for deduplication.
+Scrapes job/internship postings from multiple sources daily and posts them to the correct Discord channels. Runs as a **GitHub Actions cron job** (free tier) with **Turso/libSQL** for deduplication and **Cloudflare Workers** for slash commands.
+
+## Architecture
+
+| Component | Tool | Purpose |
+|-----------|------|---------|
+| Scheduler | GitHub Actions cron (`0 0 * * *`) | Runs pipeline daily at midnight UTC (7pm CDT) |
+| Dedup DB | [Turso](https://turso.tech) (libSQL) | Stores posted job hashes; prevents re-posting |
+| Discord posting | Webhook URLs (per channel) | Posts embeds — no bot token required |
+| Slash commands | Cloudflare Worker | `/subscribe`, `/unsubscribe`, `/add-job` |
 
 ## Sources
 
@@ -14,18 +23,20 @@ Scrapes job/internship postings from multiple sources daily and posts them to th
 
 ```
 Internships
-  #programs
   #cs-engineering-tech
   #business-finance-banking
   #consulting
   #humanities-healthcare-medicine
+  #programs
 
 Full-Time
-  #programs
   #cs-engineering-tech
   #business-finance-banking
   #consulting
   #humanities-healthcare-medicine
+  #programs
+
+#scholarships
 ```
 
 ---
@@ -43,120 +54,116 @@ playwright install chromium
 
 ### 2. Configure environment
 
+Copy and fill in the required variables:
+
 ```bash
 cp .env.example .env
 ```
 
-Fill in `.env`:
-- `DISCORD_BOT_TOKEN` — from [discord.com/developers/applications](https://discord.com/developers/applications)
-- All `DISCORD_*_CHANNEL_ID` values — right-click channels in Discord (Developer Mode on)
+Key variables:
+
 - `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
-- `SCHEDULE_TIMEZONE` — e.g. `America/Chicago`
+- `TURSO_DATABASE_URL` — from `turso db show opportunities-agent --url`
+- `TURSO_AUTH_TOKEN` — from `turso db tokens create opportunities-agent`
+- `DISCORD_WEBHOOK_*` — one webhook URL per channel (created in Discord channel settings)
+- `DISCORD_*_CHANNEL_ID` — right-click channels in Discord (Developer Mode on)
 
-### 3. Authenticate with GCP (for Firestore)
-
-```bash
-gcloud auth application-default login
-```
-
-### 4. Run
+### 3. Run
 
 ```bash
-python main.py
+python -m pipeline.entrypoint
 ```
 
-Connects to Discord, starts the scheduler (daily at 7pm Central), and serves a health check at `http://localhost:8080/health`.
+To do a dry run (classify + validate but skip Discord posting):
+
+```bash
+DRY_RUN=true python -m pipeline.entrypoint
+```
 
 ---
 
-## Deploying to Cloud Run
+## GitHub Actions (production)
 
-### Prerequisites (one-time)
+The pipeline runs automatically via `.github/workflows/daily_pipeline.yml`.
 
-```bash
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-gcloud services enable run.googleapis.com firestore.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com
-```
+### Required GitHub Secrets
 
-### 1. Create Firestore database
+Add these under **Settings → Secrets and variables → Actions**:
 
-```bash
-gcloud firestore databases create --location=us-central1 --project=YOUR_PROJECT_ID
-```
+| Secret | Description |
+|--------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `TURSO_DATABASE_URL` | Turso database URL (`https://...`) |
+| `TURSO_AUTH_TOKEN` | Turso auth token |
+| `DISCORD_WEBHOOK_INTERN_CS_ENGINEERING` | Webhook for each channel... |
+| `DISCORD_WEBHOOK_INTERN_BUSINESS_FINANCE` | |
+| `DISCORD_WEBHOOK_INTERN_CONSULTING` | |
+| `DISCORD_WEBHOOK_INTERN_HUMANITIES` | |
+| `DISCORD_WEBHOOK_INTERN_PROGRAMS` | |
+| `DISCORD_WEBHOOK_FT_CS_ENGINEERING` | |
+| `DISCORD_WEBHOOK_FT_BUSINESS_FINANCE` | |
+| `DISCORD_WEBHOOK_FT_CONSULTING` | |
+| `DISCORD_WEBHOOK_FT_HUMANITIES` | |
+| `DISCORD_WEBHOOK_FT_PROGRAMS` | |
+| `DISCORD_WEBHOOK_SCHOLARSHIPS` | |
 
-### 2. Store secrets
+### Manual trigger
 
-```bash
-echo -n "YOUR_BOT_TOKEN" | gcloud secrets create DISCORD_BOT_TOKEN --data-file=- --project=YOUR_PROJECT_ID
-echo -n "YOUR_ANTHROPIC_KEY" | gcloud secrets create ANTHROPIC_API_KEY --data-file=- --project=YOUR_PROJECT_ID
-```
-
-Grant the Cloud Run service account access:
-
-```bash
-gcloud secrets add-iam-policy-binding DISCORD_BOT_TOKEN --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role="roles/secretmanager.secretAccessor" --project=YOUR_PROJECT_ID
-gcloud secrets add-iam-policy-binding ANTHROPIC_API_KEY --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role="roles/secretmanager.secretAccessor" --project=YOUR_PROJECT_ID
-```
-
-### 3. Fill in channel IDs
-
-Edit `deploy/env-vars.txt` with your Discord channel IDs.
-
-### 4. Deploy
-
-```bash
-GCP_PROJECT_ID=YOUR_PROJECT_ID bash deploy/deploy.sh
-```
-
-To redeploy after code changes, just run step 4 again.
+Go to **Actions → Daily Opportunities Pipeline → Run workflow**. Check the `dry_run` box to classify without posting.
 
 ---
 
-## Troubleshooting
+## Cloudflare Worker (slash commands)
 
-### Check if the bot is running
+The Worker in `worker/` handles Discord slash commands via the Interactions Endpoint.
 
-Look for the bot online in Discord. If it's offline, check the logs first.
-
-### View logs
+### Deploy
 
 ```bash
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=opportunities-agent" --project=YOUR_PROJECT_ID --limit=50 --format="table(timestamp,textPayload)"
+cd worker
+npm install
+npx wrangler deploy
 ```
 
-### Check the health endpoint (requires auth)
+### Required Worker secrets (set once)
 
 ```bash
-curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" YOUR_CLOUD_RUN_URL/health
+npx wrangler secret put DISCORD_BOT_TOKEN
+npx wrangler secret put DISCORD_PUBLIC_KEY
+npx wrangler secret put TURSO_DATABASE_URL
+npx wrangler secret put TURSO_AUTH_TOKEN
 ```
 
-Should return `{"status":"ok"}`. A 403 without the auth header is expected — the service is not publicly accessible.
-
-### Check Cloud Run service status
+### Register slash commands (one-time)
 
 ```bash
-gcloud run services describe opportunities-agent --region=us-central1 --project=YOUR_PROJECT_ID
+python scripts/register_commands.py
 ```
 
-Look at `status.conditions` — `Ready: True` means it's healthy.
+Then set the Interactions Endpoint URL in Discord Developer Portal to:
+`https://opportunities-agent.<your-subdomain>.workers.dev`
 
-### Check Firestore data
+### Slash commands
 
-Go to [console.cloud.google.com](https://console.cloud.google.com) → Firestore → `posted_jobs` collection. Each document is a posted job keyed by a hash of its URL.
+| Command | Description |
+|---------|-------------|
+| `/subscribe` | Select channels to get DM notifications when new jobs are posted |
+| `/unsubscribe` | Remove all subscriptions |
+| `/add-job` | Manually submit a job posting to a channel |
 
-### Bot connected but pipeline not running
+---
 
-- Confirm `SCHEDULE_HOUR`, `SCHEDULE_MINUTE`, and `SCHEDULE_TIMEZONE` in `deploy/env-vars.txt` are correct
-- Check logs around 7pm Central for pipeline output
-- To trigger a manual run, use the `/add-job` slash command in Discord
+## Database
 
-### Redeploying after a crash
+Schema is in `database/schema.sql`. Two tables:
 
-Cloud Run automatically restarts the container on failure. If it keeps crashing, check the logs for the error and redeploy after fixing:
+- `posted_jobs` — URL hashes of every posted job (dedup key)
+- `subscribers` — user → channel subscriptions for DM notifications
+
+To initialize a fresh Turso database:
 
 ```bash
-GCP_PROJECT_ID=YOUR_PROJECT_ID bash deploy/deploy.sh
+turso db shell opportunities-agent < database/schema.sql
 ```
 
 ---
