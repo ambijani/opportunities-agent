@@ -1,12 +1,11 @@
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 
-from google.cloud import firestore
+import libsql_client
 
 logger = logging.getLogger(__name__)
-
-_COLLECTION = "posted_jobs"
 
 
 def _url_key(url: str) -> str:
@@ -15,71 +14,78 @@ def _url_key(url: str) -> str:
 
 class Database:
     def __init__(self, db_path: str = ""):
-        # db_path kept for API compatibility but unused — Firestore is serverless
-        self._db = firestore.Client()
-        self._col = self._db.collection(_COLLECTION)
-        logger.debug("Firestore client initialized (collection: %s)", _COLLECTION)
+        # db_path accepted for API compatibility but unused — Turso is remote
+        self._client = libsql_client.create_client_sync(
+            url=os.environ["TURSO_DATABASE_URL"],
+            auth_token=os.environ.get("TURSO_AUTH_TOKEN", ""),
+        )
+        logger.debug("Turso client initialized")
 
     def has_been_posted(self, url: str) -> bool:
-        doc = self._col.document(_url_key(url)).get()
-        return doc.exists
+        rs = self._client.execute(
+            "SELECT 1 FROM posted_jobs WHERE url_hash = ?", [_url_key(url)]
+        )
+        return len(rs.rows) > 0
 
     def mark_posted(self, job, channel_id: int) -> None:
-        self._col.document(_url_key(job.url)).set(
-            {
-                "url": job.url,
-                "job_id": job.id,
-                "title": job.title,
-                "company": job.company,
-                "channel_id": str(channel_id),
-                "job_type": job.job_type,
-                "category": job.category,
-                "source": job.source,
-                "posted_at": datetime.now(timezone.utc).isoformat(),
-            }
+        self._client.execute(
+            "INSERT OR IGNORE INTO posted_jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                _url_key(job.url),
+                job.url,
+                job.id,
+                job.title,
+                job.company,
+                str(channel_id),
+                job.job_type,
+                job.category,
+                job.source,
+                datetime.now(timezone.utc).isoformat(),
+            ],
         )
 
     def stats(self) -> dict:
-        docs = self._col.stream()
-        total = 0
-        by_source: dict[str, int] = {}
-        for doc in docs:
-            total += 1
-            src = doc.get("source") or "unknown"
-            by_source[src] = by_source.get(src, 0) + 1
-        return {"total": total, "by_source": by_source}
+        rs = self._client.execute(
+            "SELECT source, COUNT(*) FROM posted_jobs GROUP BY source"
+        )
+        by_source = {row[0]: row[1] for row in rs.rows}
+        return {"total": sum(by_source.values()), "by_source": by_source}
 
-    # ── Manual-pick subscriptions ─────────────────────────────────────────────
+    # ── Subscriptions ─────────────────────────────────────────────────────────
 
     def set_subscriber_channels(self, user_id: int, channel_ids: list[int]) -> None:
-        """Save (or replace) a user's channel subscription preferences."""
-        ref = self._db.collection("manual_subscribers").document(str(user_id))
-        ref.set({
-            "user_id": str(user_id),
-            "channels": [str(c) for c in channel_ids],
-            "subscribed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        uid = str(user_id)
+        now = datetime.now(timezone.utc).isoformat()
+        stmts = [libsql_client.Statement("DELETE FROM subscribers WHERE user_id = ?", [uid])]
+        for cid in channel_ids:
+            stmts.append(
+                libsql_client.Statement(
+                    "INSERT INTO subscribers VALUES (?,?,?)", [uid, str(cid), now]
+                )
+            )
+        self._client.batch(stmts)
 
     def remove_subscriber(self, user_id: int) -> bool:
-        """Remove a subscriber. Returns False if wasn't subscribed."""
-        ref = self._db.collection("manual_subscribers").document(str(user_id))
-        if not ref.get().exists:
+        uid = str(user_id)
+        # Check existence first (libsql doesn't support RETURNING in all versions)
+        rs = self._client.execute(
+            "SELECT 1 FROM subscribers WHERE user_id = ?", [uid]
+        )
+        if len(rs.rows) == 0:
             return False
-        ref.delete()
+        self._client.execute("DELETE FROM subscribers WHERE user_id = ?", [uid])
         return True
 
     def get_subscribers_for_channel(self, channel_id: int) -> list[int]:
-        """Return user IDs subscribed to a specific channel."""
-        docs = (
-            self._db.collection("manual_subscribers")
-            .where("channels", "array_contains", str(channel_id))
-            .stream()
+        rs = self._client.execute(
+            "SELECT user_id FROM subscribers WHERE channel_id = ?", [str(channel_id)]
         )
-        return [int(doc.get("user_id")) for doc in docs]
+        return [int(row[0]) for row in rs.rows]
 
     def get_subscriber_channels(self, user_id: int) -> list[str] | None:
-        """Return the channel IDs a user is subscribed to, or None if not subscribed."""
-        doc = self._db.collection("manual_subscribers").document(str(user_id)).get()
-        if not doc.exists:
+        rs = self._client.execute(
+            "SELECT channel_id FROM subscribers WHERE user_id = ?", [str(user_id)]
+        )
+        if len(rs.rows) == 0:
             return None
-        return doc.get("channels") or []
+        return [row[0] for row in rs.rows]

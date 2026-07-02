@@ -1,0 +1,85 @@
+name: Daily Opportunities Pipeline
+
+on:
+  schedule:
+    # 19:00 CDT (UTC-5) = 00:00 UTC. During CST (UTC-6, Nov–Mar) this fires at
+    # 18:00 Chicago time. Adjust to "0 1 * * *" if you need consistent 19:00 CST.
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Classify and validate but do NOT post to Discord'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  pipeline:
+    name: Run daily pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+
+      - name: Run pipeline
+        env:
+          # ── Anthropic ────────────────────────────────────────────────────────
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # ── Turso ────────────────────────────────────────────────────────────
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN:   ${{ secrets.TURSO_AUTH_TOKEN }}
+
+          # ── Discord webhooks (one per unique channel) ─────────────────────
+          DISCORD_WEBHOOK_INTERN_CS_ENGINEERING:   ${{ secrets.DISCORD_WEBHOOK_INTERN_CS_ENGINEERING }}
+          DISCORD_WEBHOOK_INTERN_BUSINESS_FINANCE: ${{ secrets.DISCORD_WEBHOOK_INTERN_BUSINESS_FINANCE }}
+          DISCORD_WEBHOOK_INTERN_CONSULTING:       ${{ secrets.DISCORD_WEBHOOK_INTERN_CONSULTING }}
+          DISCORD_WEBHOOK_INTERN_HUMANITIES:       ${{ secrets.DISCORD_WEBHOOK_INTERN_HUMANITIES }}
+          DISCORD_WEBHOOK_INTERN_PROGRAMS:         ${{ secrets.DISCORD_WEBHOOK_INTERN_PROGRAMS }}
+          DISCORD_WEBHOOK_FT_CS_ENGINEERING:       ${{ secrets.DISCORD_WEBHOOK_FT_CS_ENGINEERING }}
+          DISCORD_WEBHOOK_FT_BUSINESS_FINANCE:     ${{ secrets.DISCORD_WEBHOOK_FT_BUSINESS_FINANCE }}
+          DISCORD_WEBHOOK_FT_CONSULTING:           ${{ secrets.DISCORD_WEBHOOK_FT_CONSULTING }}
+          DISCORD_WEBHOOK_FT_HUMANITIES:           ${{ secrets.DISCORD_WEBHOOK_FT_HUMANITIES }}
+          DISCORD_WEBHOOK_FT_PROGRAMS:             ${{ secrets.DISCORD_WEBHOOK_FT_PROGRAMS }}
+          DISCORD_WEBHOOK_SCHOLARSHIPS:            ${{ secrets.DISCORD_WEBHOOK_SCHOLARSHIPS }}
+
+          # ── Channel IDs (non-secret — already in env-vars.txt) ─────────────
+          DISCORD_INTERN_CS_ENGINEERING_CHANNEL_ID:        "1389438730431103027"
+          DISCORD_INTERN_BUSINESS_FINANCE_CHANNEL_ID:      "1389439931600081027"
+          DISCORD_INTERN_CONSULTING_CHANNEL_ID:             "1389439959068315710"
+          DISCORD_INTERN_HUMANITIES_HEALTHCARE_CHANNEL_ID:  "1389454746284462222"
+          DISCORD_INTERN_PROGRAMS_CHANNEL_ID:               "1389452347574321262"
+          DISCORD_FT_CS_ENGINEERING_CHANNEL_ID:             "1389442513428811856"
+          DISCORD_FT_BUSINESS_FINANCE_CHANNEL_ID:           "1389442538607480913"
+          DISCORD_FT_CONSULTING_CHANNEL_ID:                 "1389442563978563686"
+          DISCORD_FT_HUMANITIES_HEALTHCARE_CHANNEL_ID:      "1389454800881717248"
+          DISCORD_FT_PROGRAMS_CHANNEL_ID:                   "1391801036523704400"
+          DISCORD_SCHOLARSHIPS_CHANNEL_ID:                  "1395269681610494043"
+
+          # ── Pipeline flags ────────────────────────────────────────────────
+          DRY_RUN:   ${{ github.event.inputs.dry_run || 'false' }}
+          LOG_LEVEL: INFO
+
+        run: python pipeline/entrypoint.py
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-log-${{ github.run_id }}
+          path: reports/
+          retention-days: 7

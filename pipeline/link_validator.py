@@ -147,7 +147,7 @@ async def validate_jobs(jobs: list) -> list:
     trusted = [j for j in jobs if j.source in _TRUSTED_SOURCES]
     untrusted = [j for j in jobs if j.source not in _TRUSTED_SOURCES]
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # Sanity-check trusted URLs (no network, instant)
     trusted_results = []
