@@ -1,17 +1,15 @@
-"""Run the pipeline once immediately (for testing)."""
+"""Run the pipeline once immediately (for local testing)."""
 import asyncio
 import config
 from database.db import Database
-from discord_bot.bot import OpportunitiesBot
+from pipeline.webhook_poster import WebhookPoster
 from pipeline.runner import run_pipeline
 
 
 async def main():
-    db = Database(config.DB_PATH)
-    bot = OpportunitiesBot()
-    await bot.start()
-    await run_pipeline(bot, db)
-    await bot.close()
+    db = Database()
+    poster = WebhookPoster(config.WEBHOOK_MAP)
+    await run_pipeline(poster, db)
 
 
 asyncio.run(main())

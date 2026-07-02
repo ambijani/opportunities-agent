@@ -1,12 +1,14 @@
 """
 Pipeline orchestrator.
   1. Runs all scrapers (in a thread pool — they use sync Playwright)
-  2. Deduplicates against the SQLite DB
+  2. Deduplicates against Turso DB
   3. Classifies each new job (keywords first, Claude for ambiguous ones)
-  4. Posts to Discord and records in the DB
+  4. Validates links
+  5. Posts to Discord via the provided poster (WebhookPoster or DryRunPoster)
 """
 import asyncio
 import logging
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 import config
@@ -17,17 +19,16 @@ from scrapers.intern_list_scraper import InternListScraper
 from scrapers.newgrad_jobs_scraper import NewGradJobsScraper
 from classifier import keyword_filter
 from classifier.claude_classifier import ClaudeClassifier
-from discord_bot.bot import OpportunitiesBot
 from pipeline.link_validator import validate_jobs
 
 logger = logging.getLogger(__name__)
 
 
-async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
+async def run_pipeline(poster, db: Database) -> None:
     logger.info("═══ Pipeline started ═══")
 
     # ── 1. Scrape all sources in parallel (sync scrapers → thread pool) ───────
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     scrapers = [
         GitHubScraper(),
         InternListScraper(),
@@ -56,7 +57,6 @@ async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
         return
 
     # ── 3. Classify ───────────────────────────────────────────────────────────
-    # Pass 1: fast keyword filter
     for job in new_jobs:
         keyword_filter.classify(job)
 
@@ -64,7 +64,6 @@ async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
     needs_claude = [j for j in new_jobs if j.job_type is None or j.category is None]
     logger.info("Keywords classified %d; sending %d to Claude", len(kw_done), len(needs_claude))
 
-    # Pass 2: Claude batch for the remainder
     if needs_claude:
         claude = ClaudeClassifier()
         needs_claude = await claude.classify_batch(needs_claude)
@@ -78,9 +77,6 @@ async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
         return
 
     # ── 5. Post to Discord ────────────────────────────────────────────────────
-    # Group by resolved channel_id so batching sees the full count per channel
-    # (handles cases where multiple category keys map to the same channel)
-    from collections import defaultdict
     by_channel: dict[int, list[Job]] = defaultdict(list)
     for job in classified:
         key = (job.job_type or "internship", job.category or "programs")
@@ -92,7 +88,7 @@ async def run_pipeline(bot: OpportunitiesBot, db: Database) -> None:
 
     posted = 0
     for channel_id, channel_jobs in by_channel.items():
-        successfully_posted = await bot.post_jobs(channel_id, channel_jobs)
+        successfully_posted = poster.post_jobs(channel_id, channel_jobs)
         for job in successfully_posted:
             db.mark_posted(job, channel_id)
             posted += 1
