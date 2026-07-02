@@ -49,7 +49,7 @@ async def run_pipeline(poster, db: Database) -> None:
     logger.info("Scraped %d total jobs", len(all_jobs))
 
     # ── 2. Deduplicate ────────────────────────────────────────────────────────
-    new_jobs = [j for j in all_jobs if not db.has_been_posted(j.url)]
+    new_jobs = db.filter_new_jobs(all_jobs)
     logger.info("%d new (unposted) jobs", len(new_jobs))
 
     if not new_jobs:
