@@ -74,7 +74,7 @@ jobs:
           DRY_RUN:   ${{ github.event.inputs.dry_run || 'false' }}
           LOG_LEVEL: INFO
 
-        run: python pipeline/entrypoint.py
+        run: python -m pipeline.entrypoint
 
       - name: Upload logs on failure
         if: failure()
