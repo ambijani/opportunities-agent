@@ -98,6 +98,9 @@ class Database:
         )
         return [int(row[0]) for row in rs.rows]
 
+    def close(self) -> None:
+        self._client.close()
+
     def get_subscriber_channels(self, user_id: int) -> list[str] | None:
         rs = self._client.execute(
             "SELECT channel_id FROM subscribers WHERE user_id = ?", [str(user_id)]
