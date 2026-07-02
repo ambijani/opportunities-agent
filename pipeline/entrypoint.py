@@ -30,17 +30,19 @@ async def main() -> None:
         logger.info("DRY RUN — jobs will be classified and validated but NOT posted to Discord")
 
     db = Database()
-    poster = WebhookPoster(config.WEBHOOK_MAP)
+    try:
+        poster = WebhookPoster(config.WEBHOOK_MAP)
 
-    if dry_run:
-        # Wrap poster so nothing is sent and nothing is marked posted
-        class _DryRunPoster:
-            def post_jobs(self, channel_id, jobs):
-                logger.info("[dry-run] Would post %d jobs to channel %s", len(jobs), channel_id)
-                return []
-        poster = _DryRunPoster()
+        if dry_run:
+            class _DryRunPoster:
+                def post_jobs(self, channel_id, jobs):
+                    logger.info("[dry-run] Would post %d jobs to channel %s", len(jobs), channel_id)
+                    return []
+            poster = _DryRunPoster()
 
-    await run_pipeline(poster, db)
+        await run_pipeline(poster, db)
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
