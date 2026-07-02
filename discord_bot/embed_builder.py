@@ -24,33 +24,58 @@ SOURCE_DISPLAY = {
     "manual":        "Manual submission",
 }
 
+_EMBED_TOTAL_LIMIT = 5900  # Discord max is 6000; leave headroom
+
+
+def _t(s: str | None, limit: int) -> str:
+    s = (s or "").strip()
+    return s[:limit - 3] + "..." if len(s) > limit else s or "Unknown"
+
 
 def build_embed(job: Job) -> dict:
     """Returns a Discord embed as a plain dict (compatible with webhook and REST API payloads)."""
     is_manual = job.source == "manual"
-    color = 0xF39C12 if is_manual else config.CATEGORY_COLORS.get(job.category or "programs", 0x9B59B6)
-    type_label  = TYPE_LABEL.get(job.job_type or "internship", "")
-    cat_label   = CATEGORY_DISPLAY.get(job.category or "programs", "Programs & Fellowships")
-    src_label   = SOURCE_DISPLAY.get(job.source, job.source)
+    color     = 0xF39C12 if is_manual else config.CATEGORY_COLORS.get(job.category or "programs", 0x9B59B6)
+    type_label = TYPE_LABEL.get(job.job_type or "internship", "")
+    cat_label  = CATEGORY_DISPLAY.get(job.category or "programs", "Programs & Fellowships")
+    src_label  = SOURCE_DISPLAY.get(job.source, job.source)
 
-    title = f"{'📌 ' if is_manual else ''}{type_label}  {job.title} — {job.company}"
+    title = f"{'📌 ' if is_manual else ''}{type_label}  {_t(job.title, 200)} — {_t(job.company, 100)}"
+    title = title[:256]
+
+    company   = _t(job.company, 100)
+    location  = _t(job.location, 100)
+    date      = _t(job.date_posted, 50)
+    desc      = _t(job.description, 200) if job.description else None
+    footer    = f"Source: {src_label}  •  {cat_label}"
+    apply_val = f"[Click here to apply]({job.url})"
 
     fields = [
-        {"name": "Company",     "value": (job.company    or "Unknown")[:1024], "inline": True},
-        {"name": "Location",    "value": (job.location   or "Unknown")[:1024], "inline": True},
-        {"name": "Date Posted", "value": (job.date_posted or "Unknown")[:1024], "inline": True},
+        {"name": "Company",     "value": company,  "inline": True},
+        {"name": "Location",    "value": location, "inline": True},
+        {"name": "Date Posted", "value": date,     "inline": True},
     ]
-    if job.description:
-        fields.append({"name": "Description", "value": job.description[:1024], "inline": False})
-    fields.append({"name": "Apply", "value": f"[Click here to apply]({job.url})", "inline": False})
+    if desc:
+        fields.append({"name": "Description", "value": desc, "inline": False})
+    fields.append({"name": "Apply", "value": apply_val, "inline": False})
+
+    # Guard: ensure total character count stays under Discord's 6000 limit
+    total = len(title) + len(footer) + sum(len(f["name"]) + len(f["value"]) for f in fields)
+    if total > _EMBED_TOTAL_LIMIT and desc:
+        # Trim description further until we're under the limit
+        trim = len(desc) - (total - _EMBED_TOTAL_LIMIT) - 3
+        if trim > 0:
+            fields[-2]["value"] = desc[:trim] + "..."
+        else:
+            fields = [f for f in fields if f["name"] != "Description"]
 
     embed: dict = {
-        "title":     title[:256],
+        "title":     title,
         "url":       job.url,
         "color":     color,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "fields":    fields,
-        "footer":    {"text": f"Source: {src_label}  •  {cat_label}"},
+        "footer":    {"text": footer},
     }
     if is_manual:
         embed["author"] = {"name": "✋ Manually Submitted Opportunity"}
