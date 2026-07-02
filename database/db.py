@@ -27,6 +27,22 @@ class Database:
         )
         return len(rs.rows) > 0
 
+    def filter_new_jobs(self, jobs: list) -> list:
+        """Return only jobs not yet posted — batched IN queries instead of one per job."""
+        if not jobs:
+            return []
+        hashes = [_url_key(j.url) for j in jobs]
+        already_posted: set[str] = set()
+        chunk_size = 500
+        for i in range(0, len(hashes), chunk_size):
+            chunk = hashes[i:i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            rs = self._client.execute(
+                f"SELECT url_hash FROM posted_jobs WHERE url_hash IN ({placeholders})", chunk
+            )
+            already_posted.update(row[0] for row in rs.rows)
+        return [j for j, h in zip(jobs, hashes) if h not in already_posted]
+
     def mark_posted(self, job, channel_id: int) -> None:
         self._client.execute(
             "INSERT OR IGNORE INTO posted_jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
