@@ -8,3 +8,5 @@ __pycache__/
 .DS_Store
 venv/
 .venv/
+worker/node_modules/
+worker/.wrangler/
