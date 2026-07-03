@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import config
 from database.models import Job
+from pipeline.link_validator import is_email
 
 CATEGORY_DISPLAY = {
     "cs-engineering-tech":            "CS / Engineering / Tech",
@@ -48,7 +49,9 @@ def build_embed(job: Job) -> dict:
     date      = _t(job.date_posted, 50)
     desc      = _t(job.description, 200) if job.description else None
     footer    = f"Source: {src_label}  •  {cat_label}"
-    apply_val = f"[Click here to apply]({job.url})"
+    is_email_url = is_email(job.url)
+    apply_url = f"mailto:{job.url.removeprefix('mailto:')}" if is_email_url else job.url
+    apply_val = f"Email {job.url} to apply" if is_email_url else f"[Click here to apply]({apply_url})"
 
     fields = [
         {"name": "Company",     "value": company,  "inline": True},
@@ -71,12 +74,14 @@ def build_embed(job: Job) -> dict:
 
     embed: dict = {
         "title":     title,
-        "url":       job.url,
         "color":     color,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "fields":    fields,
         "footer":    {"text": footer},
     }
+    # Discord only hyperlinks the title for http(s) urls — omit it for mailto links.
+    if not is_email_url:
+        embed["url"] = apply_url
     if is_manual:
         embed["author"] = {"name": "✋ Manually Submitted Opportunity"}
 

@@ -54,6 +54,13 @@ MALFORMED_PATTERNS = [
 ]
 _MALFORMED_RE = re.compile("|".join(MALFORMED_PATTERNS))
 
+# Some startups list a contact email instead of an apply link
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def is_email(url: str) -> bool:
+    return bool(_EMAIL_RE.match(url.removeprefix("mailto:"))) if url else False
+
 
 def _sanity_check(url: str) -> tuple[bool, str | None]:
     """
@@ -62,6 +69,9 @@ def _sanity_check(url: str) -> tuple[bool, str | None]:
     """
     if not url or not isinstance(url, str):
         return False, "empty or non-string URL"
+
+    if is_email(url):
+        return True, None
 
     if not url.startswith(("http://", "https://")):
         return False, f"missing http(s) scheme: {url!r}"
@@ -92,6 +102,10 @@ def _check_url(url: str) -> tuple[str, bool, str]:
     sane, reason = _sanity_check(url)
     if not sane:
         return url, False, f"PARSE ERROR — {reason}"
+
+    # Emails aren't fetchable — sanity check is all we can do
+    if is_email(url):
+        return url, True, "ok"
 
     # Stage 2: HTTP check
     try:

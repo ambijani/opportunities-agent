@@ -108,6 +108,14 @@ class GitHubScraper(BaseScraper):
         m = re.search(r"https?://\S+", cell)
         if m:
             return m.group(0).rstrip(")")
+        # mailto: link — some startups only list a contact email
+        m = re.search(r"mailto:([^\s\)\"]+)", cell)
+        if m:
+            return m.group(1)
+        # bare email address, e.g. "Email careers@acme.com"
+        m = re.search(r"[^\s@]+@[^\s@]+\.[^\s@]+", cell)
+        if m:
+            return m.group(0)
         return None
 
     def _clean(self, text: str) -> str:
