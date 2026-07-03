@@ -1,5 +1,12 @@
 /** Port of discord_bot/embed_builder.py — returns a Discord embed dict. */
 
+import { isEmail } from "./discord";
+
+/** Some startups list a contact email instead of an apply link. */
+function applyUrl(url: string): string {
+  return isEmail(url) ? `mailto:${url.replace(/^mailto:/i, "")}` : url;
+}
+
 const CATEGORY_DISPLAY: Record<string, string> = {
   "cs-engineering-tech":            "CS / Engineering / Tech",
   "business-finance-banking":       "Business / Finance / Banking",
@@ -60,11 +67,17 @@ export function buildEmbed(job: JobEmbed): Record<string, unknown> {
   if (job.description) {
     fields.push({ name: "Description", value: job.description.slice(0, 1024), inline: false });
   }
-  fields.push({ name: "Apply", value: `[Click here to apply](${job.url})`, inline: false });
+  const link = applyUrl(job.url);
+  fields.push({
+    name: "Apply",
+    value: isEmail(job.url) ? `Email ${job.url} to apply` : `[Click here to apply](${link})`,
+    inline: false,
+  });
 
   const embed: Record<string, unknown> = {
-    title:     title.slice(0, 256),
-    url:       job.url,
+    title: title.slice(0, 256),
+    // Discord only hyperlinks the title for http(s) urls — omit it for mailto links.
+    ...(isEmail(job.url) ? {} : { url: link }),
     color,
     timestamp: new Date().toISOString(),
     fields,

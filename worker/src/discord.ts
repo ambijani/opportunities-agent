@@ -55,8 +55,16 @@ export async function dmUser(userId: string, embed: unknown, env: Env): Promise<
   );
 }
 
-/** Validate a URL is reachable — simple HEAD check. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Some startups don't have an apply link — they just list a contact email. */
+export function isEmail(value: string): boolean {
+  return EMAIL_RE.test(value.replace(/^mailto:/i, ""));
+}
+
+/** Validate a "url", which may instead be a plain email address or mailto: link. */
 export async function validateUrl(url: string): Promise<boolean> {
+  if (isEmail(url)) return true;
   try {
     const resp = await fetch(url, { method: "HEAD", redirect: "follow" });
     return resp.status < 500;

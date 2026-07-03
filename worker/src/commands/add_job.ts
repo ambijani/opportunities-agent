@@ -43,7 +43,7 @@ export async function handleAddJobChannelSelect(
       custom_id: `add_job_modal:${selected}`,
       title: "Add Opportunity",
       components: [
-        modalRow("url",         "URL",                    "https://...",                           false),
+        modalRow("url",         "URL or Email",           "https://... or hiring@company.com",     false),
         modalRow("job_title",   "Title",                  "Software Engineer Intern",              false),
         modalRow("company",     "Company",                "Acme Corp",                             false),
         modalRow("location",    "Location (optional)",    "Remote / New York, NY",                true),
@@ -59,7 +59,8 @@ export async function handleAddJobModalSubmit(
   ctx: ExecutionContext
 ): Promise<Response> {
   const customId = (interaction.data as Record<string, unknown>)?.custom_id as string;
-  const [, jobType, category, channelId] = customId.split(":");
+  const [, payload] = customId.split(":");
+  const [jobType, category, channelId] = payload.split("|");
   const appId = env.DISCORD_APPLICATION_ID;
   const token = interaction.token as string;
 
