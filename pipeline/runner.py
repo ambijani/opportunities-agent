@@ -8,6 +8,7 @@ Pipeline orchestrator.
 """
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -22,6 +23,30 @@ from classifier.claude_classifier import ClaudeClassifier
 from pipeline.link_validator import validate_jobs
 
 logger = logging.getLogger(__name__)
+
+_MARK_POSTED_RETRIES = 3
+_MARK_POSTED_BACKOFF_SECONDS = 2
+
+
+def _mark_posted_with_retry(db: Database, job: Job, channel_id: int) -> bool:
+    """Retry a transient Turso write failure before giving up on this job."""
+    for attempt in range(1, _MARK_POSTED_RETRIES + 1):
+        try:
+            db.mark_posted(job, channel_id)
+            return True
+        except Exception:
+            if attempt == _MARK_POSTED_RETRIES:
+                logger.exception(
+                    "Failed to mark job as posted after %d attempts (already sent to Discord): %s — channel %s",
+                    _MARK_POSTED_RETRIES, job.url, channel_id,
+                )
+                return False
+            logger.warning(
+                "mark_posted attempt %d/%d failed for %s — retrying in %ds",
+                attempt, _MARK_POSTED_RETRIES, job.url, _MARK_POSTED_BACKOFF_SECONDS,
+            )
+            time.sleep(_MARK_POSTED_BACKOFF_SECONDS)
+    return False
 
 
 async def run_pipeline(poster, db: Database) -> None:
@@ -88,10 +113,14 @@ async def run_pipeline(poster, db: Database) -> None:
 
     posted = 0
     for channel_id, channel_jobs in by_channel.items():
-        successfully_posted = poster.post_jobs(channel_id, channel_jobs)
+        try:
+            successfully_posted = poster.post_jobs(channel_id, channel_jobs)
+        except Exception:
+            logger.exception("Failed to post jobs to channel %s — skipping", channel_id)
+            continue
         for job in successfully_posted:
-            db.mark_posted(job, channel_id)
-            posted += 1
+            if _mark_posted_with_retry(db, job, channel_id):
+                posted += 1
 
     logger.info("═══ Pipeline done: %d/%d jobs posted ═══", posted, len(classified))
     db_stats = db.stats()
