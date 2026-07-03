@@ -2,8 +2,9 @@ name: Daily Opportunities Pipeline
 
 on:
   schedule:
-    # 19:00 CDT (UTC-5) = 00:00 UTC. During CST (UTC-6, Nov–Mar) this fires at
-    # 18:00 Chicago time. Adjust to "0 1 * * *" if you need consistent 19:00 CST.
+    # Fixed at 00:00 UTC = 19:00 CDT (Mar–Nov). GitHub Actions cron is
+    # UTC-only and doesn't shift with DST, so during CST (Nov–Mar) this
+    # drifts to 18:00 Chicago time.
     - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
