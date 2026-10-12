@@ -16,6 +16,7 @@ Scrapes job/internship postings from multiple sources daily and posts them to th
 | Source | Type |
 |--------|------|
 | [underclassmen-opportunities](https://github.com/Jose-Gael-Cruz-Lopez/underclassmen-opportunities) | GitHub README |
+| [Summer2027-Internships](https://github.com/SimplifyJobs/Summer2027-Internships) | GitHub README (HTML tables) |
 | [intern-list.com](https://www.intern-list.com/) | Web (jobright.ai embed) |
 | [newgrad-jobs.com](https://www.newgrad-jobs.com/) | Web (jobright.ai embed) |
 

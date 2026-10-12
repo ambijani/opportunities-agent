@@ -19,6 +19,7 @@ TYPE_LABEL = {
 
 SOURCE_DISPLAY = {
     "github_readme": "GitHub (underclassmen-opportunities)",
+    "simplify_github": "GitHub (SimplifyJobs/Summer2027-Internships)",
     "intern_list":   "intern-list.com",
     "newgrad_jobs":  "newgrad-jobs.com",
     "slack":         "Slack",
