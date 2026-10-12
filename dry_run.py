@@ -18,6 +18,7 @@ from database.models import Job
 from scrapers.github_scraper import GitHubScraper
 from scrapers.intern_list_scraper import InternListScraper
 from scrapers.newgrad_jobs_scraper import NewGradJobsScraper
+from scrapers.simplify_github_scraper import SimplifyGitHubScraper
 from classifier import keyword_filter
 from classifier.claude_classifier import ClaudeClassifier
 from pipeline.link_validator import validate_jobs, _check_url, _sanity_check
@@ -65,11 +66,11 @@ async def main():
 
     # ── 1. Scrape ─────────────────────────────────────────────────────────────
     log("\n── SCRAPING ──────────────────────────────────────────────────────────")
-    scrapers = [GitHubScraper(), InternListScraper(), NewGradJobsScraper()]
+    scrapers = [GitHubScraper(), InternListScraper(), NewGradJobsScraper(), SimplifyGitHubScraper()]
     scraper_results: dict[str, list[Job]] = {}
 
     loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=len(scrapers)) as executor:
         futures = {
             type(s).__name__: loop.run_in_executor(executor, s.scrape)
             for s in scrapers
@@ -88,7 +89,7 @@ async def main():
 
     # ── 2. Deduplicate ────────────────────────────────────────────────────────
     log("\n── DEDUPLICATION ─────────────────────────────────────────────────────")
-    db = Database(config.DB_PATH)
+    db = Database()
     already_posted = [j for j in all_jobs if db.has_been_posted(j.url)]
     new_jobs = [j for j in all_jobs if not db.has_been_posted(j.url)]
     log(f"  Already posted (skipped): {len(already_posted)}")
