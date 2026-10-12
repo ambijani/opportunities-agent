@@ -24,7 +24,7 @@ class Job:
     description: str
     url: str
     date_posted: str
-    source: str       # "github_readme" | "intern_list" | "newgrad_jobs" | "slack"
+    source: str       # "github_readme" | "simplify_github" | "intern_list" | "newgrad_jobs" | "slack"
     job_type: str | None = None    # "internship" | "full_time"
     category: str | None = None    # one of 5 channel slugs
 
