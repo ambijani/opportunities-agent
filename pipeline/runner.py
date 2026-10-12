@@ -18,6 +18,7 @@ from database.models import Job
 from scrapers.github_scraper import GitHubScraper
 from scrapers.intern_list_scraper import InternListScraper
 from scrapers.newgrad_jobs_scraper import NewGradJobsScraper
+from scrapers.simplify_github_scraper import SimplifyGitHubScraper
 from classifier import keyword_filter
 from classifier.claude_classifier import ClaudeClassifier
 from pipeline.link_validator import validate_jobs
@@ -58,9 +59,10 @@ async def run_pipeline(poster, db: Database) -> None:
         GitHubScraper(),
         InternListScraper(),
         NewGradJobsScraper(),
+        SimplifyGitHubScraper(),
     ]
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=len(scrapers)) as executor:
         futures = [loop.run_in_executor(executor, s.scrape) for s in scrapers]
         results = await asyncio.gather(*futures, return_exceptions=True)
 
