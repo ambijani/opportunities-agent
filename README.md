@@ -1,180 +1,47 @@
-# opportunities-agent
+# Opportunities Agent
 
-Scrapes job/internship postings from multiple sources daily and posts them to the correct Discord channels. Runs as a **GitHub Actions cron job** (free tier) with **Turso/libSQL** for deduplication and **Cloudflare Workers** for slash commands.
+A bot that automatically finds internship, full-time, and scholarship postings from across the web and posts them to Discord — so you don't have to manually check job boards every day.
 
-## Architecture
+Every day, it:
 
-| Component | Tool | Purpose |
-|-----------|------|---------|
-| Scheduler | GitHub Actions cron (`0 0 * * *`) | Runs pipeline daily at midnight UTC (7pm CDT) |
-| Dedup DB | [Turso](https://turso.tech) (libSQL) | Stores posted job hashes; prevents re-posting |
-| Discord posting | Webhook URLs (per channel) | Posts embeds — no bot token required |
-| Slash commands | Cloudflare Worker | `/subscribe`, `/unsubscribe`, `/add-job` |
+1. **Scans** several job boards and curated GitHub lists for new postings
+2. **Sorts** each one into the right category (internship vs. full-time vs. scholarship, and by field — CS/engineering, business, consulting, healthcare, etc.)
+3. **Posts** new, never-before-seen opportunities to the matching Discord channel
+4. **Skips duplicates** — it remembers what's already been posted, so you won't see the same listing twice
 
-## Sources
+## Using it in Discord
 
-| Source | Type |
-|--------|------|
-| [underclassmen-opportunities](https://github.com/Jose-Gael-Cruz-Lopez/underclassmen-opportunities) | GitHub README |
-| [Summer2027-Internships](https://github.com/SimplifyJobs/Summer2027-Internships) | GitHub README (HTML tables) |
-| [intern-list.com](https://www.intern-list.com/) | Web (jobright.ai embed) |
-| [newgrad-jobs.com](https://www.newgrad-jobs.com/) | Web (jobright.ai embed) |
+If this bot is running in your server, there are a few slash commands available:
 
-## Discord Channel Structure
+| Command | What it does |
+|---------|--------------|
+| `/subscribe` | Pick channels you care about and get a DM whenever a new job is posted there |
+| `/unsubscribe` | Stop getting those DMs |
+| `/add-job` | Manually share a job posting with a channel yourself |
+
+## Where the postings come from
+
+- [underclassmen-opportunities](https://github.com/Jose-Gael-Cruz-Lopez/underclassmen-opportunities) (GitHub)
+- [SimplifyJobs Summer2027-Internships](https://github.com/SimplifyJobs/Summer2027-Internships) (GitHub)
+- [intern-list.com](https://www.intern-list.com/)
+- [newgrad-jobs.com](https://www.newgrad-jobs.com/)
+
+## How it decides where to post
+
+Postings are sorted into channels for **Internships** and **Full-Time** roles, each split by field:
 
 ```
-Internships
-  #cs-engineering-tech
-  #business-finance-banking
-  #consulting
-  #humanities-healthcare-medicine
-  #programs
-
-Full-Time
-  #cs-engineering-tech
-  #business-finance-banking
-  #consulting
-  #humanities-healthcare-medicine
-  #programs
-
-#scholarships
+#cs-engineering-tech
+#business-finance-banking
+#consulting
+#humanities-healthcare-medicine
+#programs
 ```
 
----
+Scholarships go to their own `#scholarships` channel. Sorting is done with a quick keyword check first, and anything ambiguous gets a second look from Claude (Anthropic's AI model) to make the right call.
 
-## Local Development
+## Under the hood
 
-### 1. Install dependencies
+This is a free/low-cost, fully automated pipeline — no server to maintain. It runs on a daily schedule using GitHub Actions, keeps track of what's already been posted with a small database, and uses a Cloudflare Worker to handle the Discord slash commands.
 
-```bash
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-playwright install chromium
-```
-
-### 2. Configure environment
-
-Copy and fill in the required variables:
-
-```bash
-cp .env.example .env
-```
-
-Key variables:
-
-- `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
-- `TURSO_DATABASE_URL` — from `turso db show opportunities-agent --url`
-- `TURSO_AUTH_TOKEN` — from `turso db tokens create opportunities-agent`
-- `DISCORD_WEBHOOK_*` — one webhook URL per channel (created in Discord channel settings)
-- `DISCORD_*_CHANNEL_ID` — right-click channels in Discord (Developer Mode on)
-
-### 3. Run
-
-```bash
-python -m pipeline.entrypoint
-```
-
-To do a dry run (classify + validate but skip Discord posting):
-
-```bash
-DRY_RUN=true python -m pipeline.entrypoint
-```
-
----
-
-## GitHub Actions (production)
-
-The pipeline runs automatically via `.github/workflows/daily_pipeline.yml`.
-
-### Required GitHub Secrets
-
-Add these under **Settings → Secrets and variables → Actions**:
-
-| Secret | Description |
-|--------|-------------|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `TURSO_DATABASE_URL` | Turso database URL (`https://...`) |
-| `TURSO_AUTH_TOKEN` | Turso auth token |
-| `DISCORD_WEBHOOK_INTERN_CS_ENGINEERING` | Webhook for each channel... |
-| `DISCORD_WEBHOOK_INTERN_BUSINESS_FINANCE` | |
-| `DISCORD_WEBHOOK_INTERN_CONSULTING` | |
-| `DISCORD_WEBHOOK_INTERN_HUMANITIES` | |
-| `DISCORD_WEBHOOK_INTERN_PROGRAMS` | |
-| `DISCORD_WEBHOOK_FT_CS_ENGINEERING` | |
-| `DISCORD_WEBHOOK_FT_BUSINESS_FINANCE` | |
-| `DISCORD_WEBHOOK_FT_CONSULTING` | |
-| `DISCORD_WEBHOOK_FT_HUMANITIES` | |
-| `DISCORD_WEBHOOK_FT_PROGRAMS` | |
-| `DISCORD_WEBHOOK_SCHOLARSHIPS` | |
-
-### Manual trigger
-
-Go to **Actions → Daily Opportunities Pipeline → Run workflow**. Check the `dry_run` box to classify without posting.
-
----
-
-## Cloudflare Worker (slash commands)
-
-The Worker in `worker/` handles Discord slash commands via the Interactions Endpoint.
-
-### Deploy
-
-```bash
-cd worker
-npm install
-npx wrangler deploy
-```
-
-### Required Worker secrets (set once)
-
-```bash
-npx wrangler secret put DISCORD_BOT_TOKEN
-npx wrangler secret put DISCORD_PUBLIC_KEY
-npx wrangler secret put TURSO_DATABASE_URL
-npx wrangler secret put TURSO_AUTH_TOKEN
-```
-
-### Register slash commands (one-time)
-
-```bash
-python scripts/register_commands.py
-```
-
-Then set the Interactions Endpoint URL in Discord Developer Portal to:
-`https://opportunities-agent.<your-subdomain>.workers.dev`
-
-### Slash commands
-
-| Command | Description |
-|---------|-------------|
-| `/subscribe` | Select channels to get DM notifications when new jobs are posted |
-| `/unsubscribe` | Remove all subscriptions |
-| `/add-job` | Manually submit a job posting to a channel |
-
----
-
-## Database
-
-Schema is in `database/schema.sql`. Two tables:
-
-- `posted_jobs` — URL hashes of every posted job (dedup key)
-- `subscribers` — user → channel subscriptions for DM notifications
-
-To initialize a fresh Turso database:
-
-```bash
-turso db shell opportunities-agent < database/schema.sql
-```
-
----
-
-## How classification works
-
-Each job goes through two stages:
-
-1. **Keyword filter** (`classifier/keyword_filter.py`) — fast regex matching assigns `job_type` (internship/full-time) and `category`. No API cost.
-
-2. **Claude classifier** (`classifier/claude_classifier.py`) — only called if keywords were ambiguous. Uses `claude-haiku-4-5` to classify the remaining jobs.
-
-Both stages always produce a result — `programs` is the fallback category if nothing else matches.
+If you want to run, deploy, or modify this project yourself, the full engineering reference — setup instructions, environment variables, deployment steps, and internals — lives in **[docs/TECHNICAL.md](docs/TECHNICAL.md)**.
